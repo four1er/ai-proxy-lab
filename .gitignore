@@ -1,0 +1,4 @@
+data/
+cliproxy/auths/
+__pycache__/
+.env

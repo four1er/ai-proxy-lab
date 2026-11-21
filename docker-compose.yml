@@ -1,0 +1,25 @@
+services:
+  cliproxyapi:
+    image: eceasy/cli-proxy-api:latest
+    container_name: cliproxyapi
+    ports:
+      - "127.0.0.1:8317:8317"
+    volumes:
+      - ./cliproxy/config.yaml:/CLIProxyAPI/config.yaml
+      - ./cliproxy/auths:/root/.cli-proxy-api
+    restart: unless-stopped
+
+  logger-proxy:
+    build: .
+    container_name: ai-logger-proxy
+    environment:
+      - UPSTREAM=http://cliproxyapi:8317
+      - HOST=0.0.0.0
+      - PORT=8400
+    ports:
+      - "127.0.0.1:8400:8400"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - cliproxyapi
+    restart: unless-stopped

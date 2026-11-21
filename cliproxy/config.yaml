@@ -1,0 +1,15 @@
+host: ""
+port: 8317
+auth-dir: "/root/.cli-proxy-api"
+api-keys:
+  - "sk-local-change-me"
+debug: false
+request-retry: 3
+quota-exceeded:
+  switch-project: true
+  switch-preview-model: true
+routing:
+  strategy: "round-robin"
+remote-management:
+  allow-remote: false
+  secret-key: ""
