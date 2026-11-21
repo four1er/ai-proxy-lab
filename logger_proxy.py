@@ -24,9 +24,11 @@ import pathlib
 import time
 import uuid
 
+import sys
+
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 UPSTREAM = os.environ.get("UPSTREAM", "http://127.0.0.1:8317")
 HOST = os.environ.get("HOST", "127.0.0.1")
@@ -48,6 +50,28 @@ async def _append(record: dict) -> None:
     async with _lock:
         with _log_path().open("a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+
+async def _append_safe(record: dict) -> None:
+    """Logging must never break forwarding: a full disk or a bad record
+    loses one log line, not the user's request."""
+    try:
+        await _append(record)
+    except Exception as exc:  # noqa: BLE001 - deliberate fail-open for logging
+        print(f"logger_proxy: failed to write log record: {exc}", file=sys.stderr)
+
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness + upstream reachability, used by Docker healthcheck and
+    ./proxy.sh. Any HTTP response from upstream counts as 'up'."""
+    try:
+        resp = await client.get(f"{UPSTREAM}/", timeout=httpx.Timeout(3.0))
+        return {"status": "ok", "upstream": UPSTREAM, "upstream_status": resp.status_code}
+    except httpx.HTTPError as exc:
+        return JSONResponse(status_code=503,
+                            content={"status": "degraded", "upstream": UPSTREAM,
+                                     "error": str(exc)})
 
 
 def _extract_completion_from_sse(chunks: list[bytes]) -> tuple[str, dict]:
@@ -93,7 +117,24 @@ async def proxy(path: str, request: Request):
 
     upstream_req = client.build_request(request.method, url, params=params,
                                         headers=headers, content=body)
-    upstream_resp = await client.send(upstream_req, stream=True)
+    try:
+        upstream_resp = await client.send(upstream_req, stream=True)
+    except httpx.HTTPError as exc:
+        await _append_safe({
+            "id": req_id, "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "method": request.method, "path": "/" + path,
+            "status": 502,
+            "latency_ms": int((time.time() - started) * 1000),
+            "stream": False,
+            "model": (req_json or {}).get("model") if isinstance(req_json, dict) else None,
+            "request": req_json,
+            "response_text": None,
+            "error": f"upstream unreachable: {exc}",
+        })
+        return JSONResponse(status_code=502,
+                            content={"error": {"message": "upstream unreachable",
+                                               "detail": str(exc),
+                                               "upstream": UPSTREAM}})
     resp_headers = {k: v for k, v in upstream_resp.headers.items()
                     if k.lower() not in ("content-length", "transfer-encoding",
                                          "content-encoding", "connection")}
@@ -110,7 +151,7 @@ async def proxy(path: str, request: Request):
             finally:
                 await upstream_resp.aclose()
                 text, last_json = _extract_completion_from_sse(chunks)
-                await _append({
+                await _append_safe({
                     "id": req_id, "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
                     "method": request.method, "path": "/" + path,
                     "status": upstream_resp.status_code,
@@ -132,7 +173,7 @@ async def proxy(path: str, request: Request):
         resp_json = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
         resp_json = None
-    await _append({
+    await _append_safe({
         "id": req_id, "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
         "method": request.method, "path": "/" + path,
         "status": upstream_resp.status_code,

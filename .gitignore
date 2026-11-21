@@ -1,4 +1,7 @@
 data/
 cliproxy/auths/
+backups/
 __pycache__/
 .env
+.local/
+*.tar.gz

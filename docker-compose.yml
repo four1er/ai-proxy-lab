@@ -3,11 +3,17 @@ services:
     image: eceasy/cli-proxy-api:latest
     container_name: cliproxyapi
     ports:
+      # Localhost only: the account pool is never exposed to the LAN/WAN.
       - "127.0.0.1:8317:8317"
     volumes:
       - ./cliproxy/config.yaml:/CLIProxyAPI/config.yaml
       - ./cliproxy/auths:/root/.cli-proxy-api
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   logger-proxy:
     build: .
@@ -17,9 +23,24 @@ services:
       - HOST=0.0.0.0
       - PORT=8400
     ports:
+      # Localhost only. For your other devices, use ./proxy.sh tailscale
+      # (Tailscale serve) instead of widening this binding.
       - "127.0.0.1:8400:8400"
     volumes:
-      - ./data:/app/data
+      # Data disk support: set AI_PROXY_DATA_DIR in .env (./proxy.sh setup
+      # creates it), e.g. AI_PROXY_DATA_DIR=/Volumes/Data/ai-proxy-data
+      - ${AI_PROXY_DATA_DIR:-./data}:/app/data
     depends_on:
       - cliproxyapi
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8400/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
