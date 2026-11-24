@@ -99,3 +99,4 @@ DATA_DIR=/Volumes/Data/ai-proxy-data ./proxy.sh setup
 - 数据中心 IP 容易触发各家风控；这也是推荐家用 Mac mini（住宅网络出口）
   而非云 VPS 的原因之一。
 - 用模型输出做训练数据在多数厂商条款下受限，自用研究与对外发布性质不同。
+# probe: test whether the PAT can open a PR (will be closed immediately)
